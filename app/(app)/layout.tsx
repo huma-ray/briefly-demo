@@ -32,7 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           modelId: ctx.aiSettings?.model ?? defaultModelId,
           provider: ctx.aiSettings,
           defaultModelId,
-          sourceUrl: process.env.NEXT_PUBLIC_SOURCE_URL ?? "https://github.com/",
+          sourceUrl: process.env.NEXT_PUBLIC_SOURCE_URL ?? "https://github.com/huma-ray/briefly-demo",
         }}
       >
         <Shell>{children}</Shell>

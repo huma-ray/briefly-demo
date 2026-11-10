@@ -150,5 +150,4 @@ New project, so no data migration. Deploy order: create the Supabase project and
 
 ## Open Questions
 
-- Public GitHub repository URL for the demo strip's "source on GitHub" link (placeholder until the repo is published).
 - Final default model id and its price, confirmed against OpenAI's model list on the day of implementation (design shows `gpt-4o-mini`).
