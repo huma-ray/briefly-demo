@@ -18,7 +18,8 @@ export type Entry = {
   key: string;
 };
 
-function sentence(e: Entry): string {
+/** "moved WEB-22 to Done"; the task editor passes key "this task". */
+export function sentence(e: Pick<Entry, "kind" | "field" | "newValue" | "key">): string {
   const v = e.newValue;
   if (e.kind === "created") return `created ${e.key}`;
   switch (e.field) {
@@ -40,7 +41,7 @@ export function InboxList({ entries }: { entries: Entry[] }) {
   }, []);
 
   return (
-    <section className="view" aria-label="Inbox">
+    <div aria-label="Activity">
       <div className="list">
         {entries.length === 0 && <p className="caption">No activity yet.</p>}
         {entries.map((e) => {
@@ -67,6 +68,6 @@ export function InboxList({ entries }: { entries: Entry[] }) {
           );
         })}
       </div>
-    </section>
+    </div>
   );
 }

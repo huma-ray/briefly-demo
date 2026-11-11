@@ -4,6 +4,7 @@ import { Fragment } from "react";
 import { useApp } from "@/components/app-state";
 import { StatusIcon } from "@/components/bits";
 import { useMarks } from "@/components/tasks/marks";
+import { AskButton } from "@/components/tasks/ask-button";
 import { STATUSES, STATUS_NAME, type Task } from "@/lib/model";
 
 function Row({ t }: { t: Task }) {
@@ -23,6 +24,7 @@ function Row({ t }: { t: Task }) {
       <span className="t">
         {t.title}
         {m.agent}
+        <AskButton taskKey={t.key} />
       </span>
       <span className="lbl">{m.label}</span>
       {m.due}

@@ -12,6 +12,7 @@ const Input = z.object({
   actionId: z.uuid(),
   decision: z.enum(["approve", "cancel"]),
   titles: z.array(z.string().trim().min(1, "Task titles cannot be empty.").max(200, "Task titles can have at most 200 characters.")).max(20).optional(),
+  text: z.string().trim().min(1, "The reply cannot be empty.").max(2000, "Replies can have at most 2000 characters.").optional(),
 });
 
 /** Postgres/RLS errors from the commit, in words for the card. */
@@ -26,7 +27,7 @@ function commitError(e: { message: string; hint?: string | null }): string {
 export async function decideAction(input: DecideInput): Promise<DecideResult> {
   const parsed = Input.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid request." };
-  const { actionId, decision: choice, titles } = parsed.data;
+  const { actionId, decision: choice, titles, text } = parsed.data;
 
   const { supabase, me } = await getContext();
   const admin = createAdminClient();
@@ -59,19 +60,23 @@ export async function decideAction(input: DecideInput): Promise<DecideResult> {
     }
   } else {
     // Atomic, idempotent, runs as the visitor: RLS re-checks access at approval time.
-    const { data, error } = await supabase.rpc("commit_pending_action", { action_id: actionId, edits: titles ? { titles } : {} });
+    const edits = tool === "reply_in_thread" ? (text ? { text } : {}) : titles ? { titles } : {};
+    const { data, error } = await supabase.rpc("commit_pending_action", { action_id: actionId, edits });
     if (error) {
       const message = commitError(error);
       await supabase.from("pending_actions").update({ status: "failed", result: { error: message }, decided_by: me.id, decided_at: now() }).eq("id", actionId).eq("status", "pending");
       decision = { status: "failed", byName: me.name, at: now(), error: message };
     } else {
-      const res = data as { already?: boolean; result?: { tasks?: { id: string; key: string }[] } };
+      const res = data as { already?: boolean; result?: { tasks?: { id: string; key: string }[]; thread?: { id: string; message_id: string } } };
       if (res.already) {
         fresh = false;
         decision = await readDecided(supabase, actionId, me.name);
       } else {
         const tasks = res.result?.tasks ?? [];
-        decision = { status: "approved", byName: me.name, at: now(), tasks, rows: tasks.length, durationMs: Date.now() - t0 };
+        const posted = res.result?.thread;
+        decision = posted
+          ? { status: "approved", byName: me.name, at: now(), thread: { id: posted.id, messageId: posted.message_id }, ...(text ? { text } : {}), rows: 1, durationMs: Date.now() - t0 }
+          : { status: "approved", byName: me.name, at: now(), tasks, rows: tasks.length, durationMs: Date.now() - t0 };
       }
     }
   }

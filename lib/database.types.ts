@@ -534,6 +534,105 @@ export type Database = {
           },
         ]
       }
+      slack_messages: {
+        Row: {
+          author_initials: string
+          author_member_id: string | null
+          author_name: string
+          avatar: number
+          body: string
+          created_at: string
+          id: string
+          lang: string
+          thread_id: string
+          workspace_id: string
+        }
+        Insert: {
+          author_initials: string
+          author_member_id?: string | null
+          author_name: string
+          avatar?: number
+          body: string
+          created_at?: string
+          id?: string
+          lang?: string
+          thread_id: string
+          workspace_id: string
+        }
+        Update: {
+          author_initials?: string
+          author_member_id?: string | null
+          author_name?: string
+          avatar?: number
+          body?: string
+          created_at?: string
+          id?: string
+          lang?: string
+          thread_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "slack_messages_author_member_id_fkey"
+            columns: ["author_member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "slack_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "slack_threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "slack_messages_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      slack_threads: {
+        Row: {
+          channel: string
+          created_at: string
+          id: string
+          mentions_me: boolean
+          script: Json | null
+          status: string
+          workspace_id: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          id?: string
+          mentions_me?: boolean
+          script?: Json | null
+          status?: string
+          workspace_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          id?: string
+          mentions_me?: boolean
+          script?: Json | null
+          status?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "slack_threads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           assignee_id: string | null
@@ -627,6 +726,7 @@ export type Database = {
       }
       workspaces: {
         Row: {
+          briefing_seeded_at: string | null
           created_at: string
           id: string
           is_demo: boolean
@@ -634,6 +734,7 @@ export type Database = {
           timezone: string
         }
         Insert: {
+          briefing_seeded_at?: string | null
           created_at?: string
           id?: string
           is_demo?: boolean
@@ -641,6 +742,7 @@ export type Database = {
           timezone?: string
         }
         Update: {
+          briefing_seeded_at?: string | null
           created_at?: string
           id?: string
           is_demo?: boolean

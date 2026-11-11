@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { formatDue, formatTime, todayKst } from "@/lib/dates";
 import { getComposerData, type ComposerData } from "@/app/actions/assistant-ui";
 import type { BrieflyMessage, ChatRequest, Decision } from "@/lib/agent/contract";
+import { DEMO_QUESTIONS, taskQuestions, threadQuestions } from "@/lib/agent/demo-questions";
 import { ApprovalCard, isPending, isTool, ReadResult, ToolChip } from "./tool-parts";
 
 const UNAVAILABLE = "The assistant is unavailable right now.";
@@ -24,25 +25,29 @@ function Text({ text }: { text: string }) {
         {para.split("\n").map((line, j) => (
           <span key={j}>
             {j > 0 && <br />}
-            {line}
+            {/* Real models add **bold** even when asked not to; render it instead of showing asterisks. */}
+            {line.split(/\*\*(.+?)\*\*/g).map((s, k) => (k % 2 ? <strong key={k}>{s}</strong> : s))}
           </span>
         ))}
       </p>
     ));
 }
 
+// Module-level so the React compiler does not treat the clock read as part of render.
+const stamp = () => ({ createdAt: Date.now() });
+
 const textOf = (m: BrieflyMessage) => m.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
 
 export function Conversation({ convId, initialMessages, focusOnOpen }: { convId: string; initialMessages: BrieflyMessage[]; focusOnOpen: boolean }) {
   const router = useRouter();
-  const { currentProject, members } = useApp();
+  const { currentProject, members, scripted, me, assistantTask, assistantThread, askAbout, askAboutThread, assistantRequest } = useApp();
   const projectKey = currentProject?.key ?? "";
   const transport = useMemo(
     () =>
       new DefaultChatTransport<BrieflyMessage>({
         api: "/api/chat",
         prepareSendMessagesRequest: ({ id, messages, trigger, body: extra }) => {
-          const body: ChatRequest = { id, message: messages[messages.length - 1], projectKey: extra?.projectKey, trigger };
+          const body: ChatRequest = { id, message: messages[messages.length - 1], projectKey: extra?.projectKey, taskKey: extra?.taskKey || undefined, threadId: extra?.threadId || undefined, trigger };
           return { body };
         },
       }),
@@ -78,11 +83,27 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, error]);
 
+  function ask(t: string) {
+    if (busy) return;
+    const taskKey = assistantTask ?? undefined;
+    const threadId = assistantThread?.id;
+    void sendMessage({ text: t, metadata: { ...stamp(), taskKey, threadId, threadChannel: assistantThread?.channel } }, { body: { projectKey, taskKey, threadId } });
+  }
+
+  // A quick action elsewhere (Today) asks a question: send it once per request.
+  const asked = useRef(assistantRequest.n);
+  useEffect(() => {
+    if (assistantRequest.n === asked.current) return;
+    asked.current = assistantRequest.n;
+    if (assistantRequest.prompt) ask(assistantRequest.prompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to new requests only
+  }, [assistantRequest]);
+
   function send() {
     const t = text.trim();
-    if (!t || busy) return;
+    if (!t) return;
     setText("");
-    void sendMessage({ text: t, metadata: { createdAt: Date.now() } }, { body: { projectKey } });
+    ask(t);
   }
 
   function fill(t: string) {
@@ -113,6 +134,8 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
       }));
       return confirmation && !next.some((m) => m.id === confirmation.id) ? [...next, confirmation] : next;
     });
+    // A posted reply resolves the attached thread: stop offering "Draft a reply" for it.
+    if (decision.thread && assistantThread?.id === decision.thread.id) askAboutThread({ ...assistantThread, waiting: false });
     router.refresh();
   }
 
@@ -126,7 +149,22 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
   const f = filter.trim().toLowerCase();
   const people = members.filter((m) => m.name.toLowerCase().includes(f));
   const tasks = data.tasks.filter((t) => (t.key + " " + t.title).toLowerCase().includes(f)).slice(0, 30);
-  const sugs = ["Summarize this project", "What's due this week?", ...(data.assignSuggestion ? [data.assignSuggestion] : [])];
+  // The attached task's own questions replace the general ones while it is attached.
+  const attached = assistantTask ? data.tasks.find((t) => t.key === assistantTask) : undefined;
+  const taskQs = attached ? taskQuestions(attached, me.id) : assistantThread ? threadQuestions(assistantThread) : null;
+  const sugs = taskQs ? taskQs.map((q) => q.prompt) : ["Summarize this project", "What's due this week?", ...(data.assignSuggestion ? [data.assignSuggestion] : [])];
+  const chipKey = assistantTask ?? assistantThread?.channel;
+  const chip = chipKey && (
+    <div className="attach">
+      <span className="k">{chipKey}</span>
+      <span className="t" lang={assistantThread?.korean ? "ko" : undefined}>
+        {assistantThread ? `${assistantThread.excerpt} · simulated Slack` : (attached?.title ?? "Attached task")}
+      </span>
+      <button type="button" aria-label={`Remove ${chipKey}`} onClick={() => askAbout(null)}>
+        <I name="x" />
+      </button>
+    </div>
+  );
   const row = "block w-full truncate rounded px-2 py-1 text-left text-[12.5px] hover:bg-[var(--hover)]";
 
   return (
@@ -136,6 +174,7 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
         {messages.map((m) =>
           m.role === "user" ? (
             <div className="msg-u" key={m.id}>
+              {(m.metadata?.taskKey ?? m.metadata?.threadChannel) && <span className="u-task">{m.metadata?.taskKey ?? m.metadata?.threadChannel}</span>}
               {textOf(m)}
             </div>
           ) : (
@@ -182,6 +221,26 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
         )}
       </div>
 
+      {scripted ? (
+        <div className="composer demo-qs">
+          <div className="demo-qs-h">
+            <span>Try a question</span>
+            <span className="tag-demo">Scripted demo</span>
+          </div>
+          {chip}
+          <div className="sugs">
+            {(taskQs ?? DEMO_QUESTIONS).map((q) => (
+              <button className="sug" type="button" key={q.id} disabled={busy} onClick={() => ask(q.prompt)}>
+                {q.label}
+              </button>
+            ))}
+          </div>
+          <div className="fine">
+            <I name="lock" />
+            Free-form chat is off in the public demo. Replies are scripted; the tools, approvals and Agent log are real. An Admin who connects their own model gets free chat.
+          </div>
+        </div>
+      ) : (
       <form
         className="composer"
         onSubmit={(e) => {
@@ -189,6 +248,7 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
           send();
         }}
       >
+        {chip}
         <div className="sugs">
           {sugs.map((s) => (
             <button className="sug" type="button" key={s} onClick={() => fill(s)}>
@@ -248,6 +308,7 @@ export function Conversation({ convId, initialMessages, focusOnOpen }: { convId:
           Changes always ask for approval first · 20 requests a day in the demo
         </div>
       </form>
+      )}
     </>
   );
 }

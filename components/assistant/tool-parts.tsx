@@ -8,7 +8,7 @@ import { useApp } from "@/components/app-state";
 import { formatDue, formatTime } from "@/lib/dates";
 import { STATUS_NAME } from "@/lib/model";
 import { decideAction } from "@/app/actions/agent";
-import type { Decision, DecideResult, BrieflyMessage, ReadOutput, WriteOutput } from "@/lib/agent/contract";
+import type { Decision, DecideResult, BrieflyMessage, MiniTask, ReadOutput, WriteOutput } from "@/lib/agent/contract";
 
 /** A tool-<name> part as the AI SDK delivers it (tools are untyped on the client). */
 export type ToolPart = {
@@ -57,25 +57,32 @@ export function ToolChip({ part }: { part: ToolPart }) {
   );
 }
 
+/** Compact clickable task rows (assistant answers, Today). */
+export function MiniRows({ tasks }: { tasks: MiniTask[] }) {
+  const { memberById, openTask } = useApp();
+  if (!tasks.length) return null;
+  return (
+    <div className="mini">
+      {tasks.map((t) => (
+        <div key={t.id} className="mini-row" role="button" tabIndex={0} style={{ cursor: "pointer" }} onClick={() => openTask(t.key)} onKeyDown={(e) => e.key === "Enter" && openTask(t.key)}>
+          <StatusIcon status={t.status} />
+          <span className="id">{t.key}</span>
+          <span className="t">{t.title}</span>
+          <DuePill due={t.dueDate} status={t.status} />
+          <Avatar member={memberById(t.assigneeId)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Mini rows and scope note under a successful read. */
 export function ReadResult({ output }: { output: unknown }) {
-  const { memberById, openTask } = useApp();
   if (!isReadOk(output)) return null;
   return (
     <>
-      {output.tasks.length > 0 && (
-        <div className="mini">
-          {output.tasks.map((t) => (
-            <div key={t.id} className="mini-row" role="button" tabIndex={0} style={{ cursor: "pointer" }} onClick={() => openTask(t.key)} onKeyDown={(e) => e.key === "Enter" && openTask(t.key)}>
-              <StatusIcon status={t.status} />
-              <span className="id">{t.key}</span>
-              <span className="t">{t.title}</span>
-              <DuePill due={t.dueDate} status={t.status} />
-              <Avatar member={memberById(t.assigneeId)} />
-            </div>
-          ))}
-        </div>
-      )}
+      <MiniRows tasks={output.tasks} />
+      {output.threads && <ThreadRows threads={output.threads} />}
       {output.scope.searched < output.scope.total && (
         <div className="scope">
           <I name="shield" />
@@ -90,22 +97,44 @@ export function ReadResult({ output }: { output: unknown }) {
 
 const VERB: Record<string, string> = { Create: "created", Update: "updated", Assign: "assigned" };
 
+/** Simulated Slack thread rows under list_mentions / get_thread. */
+function ThreadRows({ threads }: { threads: NonNullable<Extract<ReadOutput, { ok: true }>["threads"]> }) {
+  if (!threads.length) return null;
+  return (
+    <div className="mini">
+      {threads.map((t) => (
+        <Link key={t.id} href="/inbox?tab=slack" className="mini-row thread-row">
+          <span className="ch">{t.channel}</span>
+          <span className="t">
+            <b>{t.author}</b> <span lang={t.lang}>{t.excerpt}</span>
+          </span>
+          <span className={`state ${t.status === "waiting" ? "wait" : "done"}`}>{t.status === "waiting" ? "Needs reply" : t.status === "done" ? "Done" : ""}</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export function ApprovalCard({ tool, output, onDecided }: { tool: string; output: unknown; onDecided: (actionId: string, decision: Decision, confirmation?: BrieflyMessage) => void }) {
   const { markFresh } = useApp();
   const o = output as Pending;
   const { proposal, actionId } = o;
   const [editing, setEditing] = useState(false);
   const [titles, setTitles] = useState(() => proposal.items.map((i) => i.title));
+  const [text, setText] = useState(proposal.reply?.text ?? "");
+  const reply = proposal.reply;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const decision = o.decision && o.decision.status !== "failed" ? o.decision : undefined;
   const state = decision?.status ?? "pending";
-  const canEdit = proposal.items.some((i) => i.titleEditable);
+  const canEdit = !!reply || proposal.items.some((i) => i.titleEditable);
   const emptyTitle = proposal.items.some((it, i) => it.titleEditable && !titles[i].trim());
+  const emptyReply = !!reply && !text.trim();
 
   async function decide(kind: "approve" | "cancel") {
     if (busy) return;
     if (kind === "approve" && emptyTitle) return setError("Every task needs a title.");
+    if (kind === "approve" && emptyReply) return setError("The reply cannot be empty.");
     setBusy(true);
     setError(null);
     let res: DecideResult;
@@ -113,7 +142,8 @@ export function ApprovalCard({ tool, output, onDecided }: { tool: string; output
       res = await decideAction({
         actionId,
         decision: kind,
-        titles: kind === "approve" && canEdit ? titles.map((t) => t.trim()) : undefined,
+        titles: kind === "approve" && canEdit && !reply ? titles.map((t) => t.trim()) : undefined,
+        text: kind === "approve" && reply && text.trim() !== reply.text ? text.trim() : undefined,
       });
     } catch {
       res = { ok: false, error: "Could not reach the server. Nothing was written." };
@@ -131,7 +161,17 @@ export function ApprovalCard({ tool, output, onDecided }: { tool: string; output
 
   const n = decision?.tasks?.length ?? proposal.items.length;
   const verb = VERB[proposal.approveLabel.split(" ")[0]] ?? "updated";
-  const heading = state === "approved" ? `${n} ${n === 1 ? "task" : "tasks"} ${verb}` : state === "cancelled" ? "Cancelled" : proposal.heading;
+  const heading = reply
+    ? state === "approved"
+      ? "Reply posted to the simulated thread"
+      : state === "cancelled"
+        ? "Cancelled"
+        : proposal.heading
+    : state === "approved"
+      ? `${n} ${n === 1 ? "task" : "tasks"} ${verb}`
+      : state === "cancelled"
+        ? "Cancelled"
+        : proposal.heading;
 
   return (
     <div className="approve" data-state={state}>
@@ -140,6 +180,19 @@ export function ApprovalCard({ tool, output, onDecided }: { tool: string; output
         <span>{heading}</span>
         <code>{tool}</code>
       </div>
+      {reply && (
+        <div className="ap-reply">
+          <div className="ap-excerpt">
+            {reply.channel} · {reply.excerpt}
+          </div>
+          {editing && state === "pending" ? (
+            <textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Reply text" rows={4} />
+          ) : (
+            <p className="ap-text">{state === "pending" ? text : (decision?.text ?? reply.text)}</p>
+          )}
+          {reply.meaning && <p className="ap-meaning">English: {reply.meaning}</p>}
+        </div>
+      )}
       {proposal.items.map((it, i) => (
         <div className="ap-row" key={i}>
           <I name="plus" className="plus" />
@@ -169,7 +222,7 @@ export function ApprovalCard({ tool, output, onDecided }: { tool: string; output
           <>
             <div className="note">
               <I name="lock" />
-              {error ?? "Nothing is written until you approve."}
+              {error ?? (reply ? "Nothing is posted until you approve." : "Nothing is written until you approve.")}
             </div>
             <button className="btn btn-primary" type="button" disabled={busy} onClick={() => decide("approve")}>
               <I name="check" />

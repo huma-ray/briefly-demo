@@ -3,6 +3,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Label, Member, Project, Role } from "@/lib/model";
+import { seedBriefing } from "@/lib/agent/briefing";
 
 /**
  * Everything a page needs about the visitor and their sandbox, read once per
@@ -19,7 +20,7 @@ export const getContext = cache(async () => {
   if (error || !workspaceId) redirect("/api/session/reset");
 
   const [ws, members, projects, labels, mine, counts, ai] = await Promise.all([
-    supabase.from("workspaces").select("id, name").eq("id", workspaceId).single(),
+    supabase.from("workspaces").select("id, name, briefing_seeded_at").eq("id", workspaceId).single(),
     supabase.from("members").select("id, name, handle, initials, avatar, role, user_id, inbox_seen_at").order("name"),
     supabase.from("projects").select("id, key, name, color, position").order("position"),
     supabase.from("labels").select("id, name, color").order("name"),
@@ -42,7 +43,7 @@ export const getContext = cache(async () => {
     inboxSeenAt: meRow.inbox_seen_at,
   };
 
-  return {
+  const ctx = {
     supabase,
     userId,
     workspace: ws.data,
@@ -56,6 +57,10 @@ export const getContext = cache(async () => {
     /** Custom model endpoint, if an Admin set one. The key itself is never readable here. */
     aiSettings: ai.data ? { baseUrl: ai.data.base_url, model: ai.data.model, keyHint: ai.data.key_hint } : null,
   };
+  // A new sandbox opens with a briefing and one ready-to-approve card (once per workspace).
+  // Done here, inside the per-request cache, so the layout and the page both see it.
+  if (!ws.data.briefing_seeded_at) await seedBriefing(ctx);
+  return ctx;
 });
 
 export type Context = Awaited<ReturnType<typeof getContext>>;

@@ -31,6 +31,18 @@ test("patchDecision adds the decision to the matching tool part only, with edite
 test("confirmations", () => {
   assert.equal(buildConfirmation("create_task", decision, proposal), "Created WEB-26 and WEB-27 in Website relaunch. Want me to assign them or set due dates?");
   assert.equal(buildConfirmation("create_task", { ...decision, status: "cancelled" }), "Cancelled. Nothing was changed.");
+  const done = { ...proposal, items: [{ ...item("A"), assigneeName: "Priya Shah", dueDate: "2026-11-16" }] };
+  assert.equal(buildConfirmation("create_task", { ...decision, tasks: [{ id: "1", key: "ONB-10" }] }, done), "Created ONB-10 in Website relaunch. Anything else?");
+  const reply: Proposal = { heading: "Reply in #partner-kr (simulated)", approveLabel: "Post reply", items: [], reply: { threadId: "t", channel: "#partner-kr", excerpt: "안녕하세요", text: "네", meaning: "Yes" } };
+  assert.equal(buildConfirmation("reply_in_thread", { ...decision, tasks: undefined, thread: { id: "t", messageId: "m" } }, reply), "Posted your reply in #partner-kr (simulated). Anything else?");
+  const { proposal: posted } = patchDecision(
+    [{ id: "a", role: "assistant", parts: [{ type: "tool-reply_in_thread", toolCallId: "c", state: "output-available", input: {}, output: { ok: true, status: "pending_approval", actionId: "x", proposal: reply, note: "n" } }] }] as unknown as BrieflyMessage[],
+    "c",
+    { ...decision, text: "네, 보내드릴게요" },
+  );
+  assert.equal(posted?.reply?.text, "네, 보내드릴게요", "an edited reply is stored as posted");
+  const noDue = { ...proposal, items: [{ ...item("A"), assigneeName: "Priya Shah" }] };
+  assert.match(buildConfirmation("create_task", decision, noDue), /Want me to set due dates\?$/);
   assert.match(buildConfirmation("assign_task", { ...decision, status: "failed", error: "No access." }), /not applied: No access\. Nothing was changed/);
   const assign: Proposal = { ...proposal, items: [{ ...item("A"), titleEditable: false, assigneeName: "Tomás García" }] };
   assert.match(buildConfirmation("assign_task", decision, assign), /^Assigned WEB-26 and WEB-27 to Tomás García\./);

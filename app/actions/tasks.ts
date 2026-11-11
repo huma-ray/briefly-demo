@@ -56,16 +56,22 @@ export async function moveTask(id: string, status: Status, position: number): Pr
   return { ok: true };
 }
 
-/** A task by key plus the ids of the members of its project (for the assignee select). */
-export async function getTask(key: string): Promise<{ ok: true; task: Task; memberIds: string[] } | { ok: false }> {
+export type TaskActivity = { id: string; actorId: string | null; assistant: boolean; kind: string; field: string | null; newValue: string | null; at: string };
+
+/** A task by key, the ids of its project's members (for the assignee select) and its activity, oldest first. */
+export async function getTask(key: string): Promise<{ ok: true; task: Task; memberIds: string[]; activity: TaskActivity[] } | { ok: false }> {
   const k = parseKey(key);
   if (!k) return { ok: false };
   const { supabase } = await getContext();
   const { data } = await supabase.from("tasks").select(TASK_COLUMNS).eq("number", k.number).eq("projects.key", k.project).maybeSingle();
   if (!data) return { ok: false };
   const task = toTask(data);
-  const { data: pm } = await supabase.from("project_members").select("member_id").eq("project_id", task.projectId);
-  return { ok: true, task, memberIds: (pm ?? []).map((r) => r.member_id) };
+  const [{ data: pm }, { data: act }] = await Promise.all([
+    supabase.from("project_members").select("member_id").eq("project_id", task.projectId),
+    supabase.from("activity").select("id, actor_id, source, kind, field, new_value, created_at").eq("task_id", task.id).order("created_at").limit(100),
+  ]);
+  const activity = (act ?? []).map((a) => ({ id: a.id, actorId: a.actor_id, assistant: a.source === "assistant", kind: a.kind, field: a.field, newValue: a.new_value, at: a.created_at }));
+  return { ok: true, task, memberIds: (pm ?? []).map((r) => r.member_id), activity };
 }
 
 export async function getProjectMembers(projectKey: string): Promise<{ ok: true; memberIds: string[] } | { ok: false }> {

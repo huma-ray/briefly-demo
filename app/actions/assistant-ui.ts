@@ -4,7 +4,7 @@ import { getContext } from "@/lib/context";
 import { TASK_COLUMNS, toTask, type Status } from "@/lib/model";
 
 export type ComposerData = {
-  tasks: { key: string; title: string; status: Status }[];
+  tasks: { key: string; title: string; status: Status; assigneeId: string | null }[];
   /** "Assign WEB-25 to Tomás", or null when the project has no unassigned open task / teammate. */
   assignSuggestion: string | null;
 };
@@ -23,7 +23,7 @@ export async function getComposerData(projectKey: string): Promise<ComposerData>
   const mate = (teamRes.data ?? []).map((r) => r.members as unknown as { id: string; name: string }).find((m) => m.id !== me.id);
   const open = tasks.find((t) => t.projectKey === projectKey && !t.assigneeId && t.status !== "done");
   return {
-    tasks: tasks.map((t) => ({ key: t.key, title: t.title, status: t.status })),
+    tasks: tasks.map((t) => ({ key: t.key, title: t.title, status: t.status, assigneeId: t.assigneeId })),
     assignSuggestion: open && mate ? `Assign ${open.key} to ${mate.name.split(" ")[0]}` : null,
   };
 }

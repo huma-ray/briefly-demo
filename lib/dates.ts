@@ -49,3 +49,9 @@ export function formatRelative(iso: string, now = new Date()): string {
 export function startOfKstDay(now = new Date()): string {
   return new Date(`${todayKst(now)}T00:00:00+09:00`).toISOString();
 }
+
+/** "Good morning" / "Good afternoon" / "Good evening" by the KST hour. */
+export function greeting(now = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "Asia/Seoul" }).format(now));
+  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}

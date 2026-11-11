@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { I } from "@/components/icons";
 import { useApp } from "@/components/app-state";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,26 +12,47 @@ import { Conversation } from "./conversation";
 import { ProviderPopover } from "./provider-popover";
 
 const STORE = "briefly.conversation";
-type Conv = { id: string; messages: BrieflyMessage[] };
+// `v` changes when the same conversation is reloaded, so the chat remounts with the new messages.
+type Conv = { id: string; messages: BrieflyMessage[]; v?: number };
 
 export function AssistantPanel({ onClose, focusOnOpen }: { onClose: () => void; focusOnOpen: boolean }) {
-  const { me, role, counts } = useApp();
+  const { me, role, counts, assistantRequest } = useApp();
   const [conv, setConv] = useState<Conv | null>(null);
   const [history, setHistory] = useState<ConversationSummary[]>([]);
-  const [open, setOpen] = useState(false);
+  // The history menu belongs to the page it was opened on: it is closed on load and after any navigation.
+  const pathname = usePathname();
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const open = openOn === pathname;
+  const setOpen = (o: boolean) => setOpenOn(o ? pathname : null);
 
-  // Resume the last conversation of this browser, else start a new one.
+  // Resume the last conversation of this browser, else the newest one (a new sandbox's
+  // "Today's briefing"), else start a new one.
   useEffect(() => {
     let saved: string | null = null;
     try {
       saved = localStorage.getItem(STORE);
     } catch {}
     const fresh = () => setConv({ id: crypto.randomUUID(), messages: [] });
-    if (!saved) return fresh();
+    const open = (id: string) => loadConversation(id).then((messages) => (messages.length ? setConv({ id, messages }) : fresh()));
+    const newest = () =>
+      listConversations()
+        .then((list) => (list[0] ? open(list[0].id) : fresh()))
+        .catch(fresh);
+    if (!saved) return void newest();
+    // A saved id from an older sandbox loads nothing: fall back to the newest conversation.
     loadConversation(saved)
-      .then((messages) => (messages.length ? setConv({ id: saved, messages }) : fresh()))
-      .catch(fresh);
+      .then((messages) => (messages.length ? setConv({ id: saved, messages }) : newest()))
+      .catch(newest);
   }, []);
+
+  // The Approvals page asks for a specific conversation, or for a reload of the one shown after a decision there.
+  const shownId = conv?.id;
+  useEffect(() => {
+    const { convId: id, quiet } = assistantRequest;
+    if (!id || (quiet && id !== shownId)) return;
+    loadConversation(id).then((messages) => setConv({ id, messages, v: assistantRequest.n })).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to requests only, not to the shown id changing
+  }, [assistantRequest]);
 
   useEffect(() => {
     if (!conv) return;
@@ -97,7 +119,7 @@ export function AssistantPanel({ onClose, focusOnOpen }: { onClose: () => void; 
           Acting as <b>{me.name}</b> · {role === "admin" ? `Admin · can see all ${counts.total} projects` : `Member · can see ${counts.visible} of ${counts.total} projects`}
         </span>
       </div>
-      {conv && <Conversation key={conv.id} convId={conv.id} initialMessages={conv.messages} focusOnOpen={focusOnOpen} />}
+      {conv && <Conversation key={`${conv.id}:${conv.v ?? 0}`} convId={conv.id} initialMessages={conv.messages} focusOnOpen={focusOnOpen} />}
     </>
   );
 }

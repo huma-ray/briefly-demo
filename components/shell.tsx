@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { setRole } from "@/app/actions/session";
 import { useApp } from "@/components/app-state";
 import { Avatar } from "@/components/bits";
@@ -14,6 +14,68 @@ import type { Role } from "@/lib/model";
 
 const NARROW = "(max-width: 1199px)";
 const PHONE = "(max-width: 759px)";
+const CHAT_W = { min: 300, max: 640, step: 16, key: "briefly.chatWidth" };
+
+/** Drag (or arrow keys) on the assistant's left edge to resize it; the width is kept per browser. */
+function ChatResizer({ app }: { app: React.RefObject<HTMLDivElement | null> }) {
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const width = () => app.current?.querySelector(".chat")?.getBoundingClientRect().width ?? 344;
+  const apply = (w: number) => {
+    // Leave the board at least 480px.
+    const max = Math.min(CHAT_W.max, innerWidth - 224 - 480);
+    const v = Math.round(Math.max(CHAT_W.min, Math.min(max, w)));
+    app.current?.style.setProperty("--chat-w", `${v}px`);
+    return v;
+  };
+  const save = (w: number) => {
+    try {
+      localStorage.setItem(CHAT_W.key, String(w));
+    } catch {}
+  };
+
+  useEffect(() => {
+    try {
+      const w = Number(localStorage.getItem(CHAT_W.key));
+      if (w) apply(w);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
+  }, []);
+
+  return (
+    <div
+      className="chat-resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize assistant"
+      tabIndex={0}
+      data-drag={dragging || undefined}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { x: e.clientX, w: width() };
+        setDragging(true);
+      }}
+      onPointerMove={(e) => drag.current && apply(drag.current.w + drag.current.x - e.clientX)}
+      onPointerUp={() => {
+        drag.current = null;
+        setDragging(false);
+        save(width());
+      }}
+      onDoubleClick={() => {
+        app.current?.style.removeProperty("--chat-w");
+        try {
+          localStorage.removeItem(CHAT_W.key);
+        } catch {}
+      }}
+      onKeyDown={(e) => {
+        const d = e.key === "ArrowLeft" ? CHAT_W.step : e.key === "ArrowRight" ? -CHAT_W.step : 0;
+        if (!d) return;
+        e.preventDefault();
+        save(apply(width() + d));
+      }}
+    />
+  );
+}
 
 /** The app frame from the design: sidebar | main | assistant, with drawers below 1200px / 760px. */
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -25,6 +87,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [narrow, setNarrow] = useState(false);
   const [phone, setPhone] = useState(false);
   const [pending, startTransition] = useTransition();
+  const appRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const n = matchMedia(NARROW);
@@ -42,6 +105,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
       p.removeEventListener("change", sync);
     };
   }, []);
+
+  // askAbout / openConversation from anywhere in the app open the panel (adjusting state during render, no effect).
+  const [seenRequest, setSeenRequest] = useState(app.assistantRequest.n);
+  if (app.assistantRequest.n !== seenRequest) {
+    setSeenRequest(app.assistantRequest.n);
+    if (!app.assistantRequest.quiet) setChatChoice(true);
+  }
 
   const chatOpen = chatChoice ?? !narrow;
   const toggleChat = useCallback(() => setChatChoice(!chatOpen), [chatOpen]);
@@ -81,6 +151,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div
+      ref={appRef}
       className="app"
       data-role={app.role}
       data-chat={chatOpen ? "open" : "closed"}
@@ -108,6 +179,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </button>
 
         <nav className="nav" aria-label="Main">
+          <Link href="/today" aria-current={view.kind === "today" ? "page" : undefined}>
+            <I name="spark" />
+            Today
+          </Link>
           <Link href="/inbox" aria-current={view.kind === "inbox" ? "page" : undefined}>
             <I name="inbox" />
             Inbox{app.inboxUnread > 0 && <span className="count">{app.inboxUnread}</span>}
@@ -115,6 +190,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <Link href="/my" aria-current={view.kind === "my" ? "page" : undefined}>
             <I name="mine" />
             My tasks{app.myOpenTasks > 0 && <span className="count">{app.myOpenTasks}</span>}
+          </Link>
+          <Link href="/approvals" aria-current={view.kind === "approvals" ? "page" : undefined}>
+            <I name="check" />
+            Approvals{app.pendingApprovals > 0 && <span className="count accent">{app.pendingApprovals}</span>}
           </Link>
           <Link href="/log" aria-current={view.kind === "log" ? "page" : undefined}>
             <I name="activity" />
@@ -182,11 +261,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </button>
             ))}
           </div>
-          <button className="btn assist" type="button" aria-pressed={chatOpen} onClick={toggleChat}>
-            <I name="spark" />
-            <span className="lbl">Assistant</span>
-            <kbd>⌘J</kbd>
-          </button>
         </header>
 
         <div className="strip">
@@ -201,8 +275,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </main>
 
       <aside className="chat" aria-label="Assistant">
+        <ChatResizer app={appRef} />
         <AssistantPanel onClose={() => setChatChoice(false)} focusOnOpen={narrow && chatOpen} />
       </aside>
+
+      {/* Fixed in the corner so it never shifts the header; hidden while the panel is open (the panel has its own close). */}
+      {!chatOpen && (
+        <button className="fab" type="button" aria-label="Open assistant" onClick={toggleChat}>
+          <I name="spark" />
+          <span className="lbl">Ask assistant</span>
+          <kbd>⌘J</kbd>
+        </button>
+      )}
 
       <SearchPalette />
       <TaskSheetHost />
@@ -210,7 +294,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function viewOf(pathname: string): { kind: "project" | "inbox" | "my" | "log"; title: string; tab?: "board" | "list" | "log" } {
+function viewOf(pathname: string): { kind: "project" | "today" | "approvals" | "inbox" | "my" | "log"; title: string; tab?: "board" | "list" | "log" } {
+  if (pathname.startsWith("/today")) return { kind: "today", title: "Today" };
+  if (pathname.startsWith("/approvals")) return { kind: "approvals", title: "Approvals" };
   if (pathname.startsWith("/log")) return { kind: "log", title: "Agent log", tab: "log" };
   if (pathname.startsWith("/inbox")) return { kind: "inbox", title: "Inbox" };
   if (pathname.startsWith("/my")) return { kind: "my", title: "My tasks" };

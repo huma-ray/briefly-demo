@@ -28,7 +28,9 @@ export function patchDecision(
         const items = out.proposal.items.map((it, i) =>
           decision.status === "approved" && it.titleEditable && titles?.[i] ? { ...it, title: titles[i].trim() } : it,
         );
-        proposal = { ...out.proposal, items };
+        // An edited reply is stored as posted, so the reloaded card shows what was actually sent.
+        const reply = out.proposal.reply && decision.status === "approved" && decision.text ? { ...out.proposal.reply, text: decision.text } : out.proposal.reply;
+        proposal = { ...out.proposal, items, ...(reply ? { reply } : {}) };
         next = { ...out, proposal };
       }
       return { ...p, output: { ...next, decision } } as typeof p;
@@ -38,8 +40,8 @@ export function patchDecision(
   return { messages: patched, proposal };
 }
 
-export function joinList(xs: string[]): string {
-  return xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+export function joinList(xs: string[], conj = "and"): string {
+  return xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} ${conj} ${xs[xs.length - 1]}`;
 }
 
 const STATUS_NAME = { todo: "Todo", doing: "In progress", done: "Done" } as const;
@@ -48,11 +50,16 @@ const STATUS_NAME = { todo: "Todo", doing: "In progress", done: "Done" } as cons
 export function buildConfirmation(tool: WriteTool, decision: Decision, proposal?: Proposal): string {
   if (decision.status === "cancelled") return "Cancelled. Nothing was changed.";
   if (decision.status === "failed") return `That change was not applied: ${decision.error ?? "unknown error"} Nothing was changed.`;
+  if (tool === "reply_in_thread") return `Posted your reply in ${proposal?.reply?.channel ?? "the thread"} (simulated). Anything else?`;
   const keys = joinList((decision.tasks ?? []).map((t) => t.key));
   const first = proposal?.items[0];
   if (tool === "create_task") {
     const projects = joinList([...new Set((proposal?.items ?? []).map((i) => i.projectName))]);
-    return `Created ${keys}${projects ? ` in ${projects}` : ""}. Want me to assign them or set due dates?`;
+    // Offer only what is still missing, so a fully specified task does not get a pointless question.
+    const items = proposal?.items ?? [];
+    const them = items.length === 1 ? "it" : "them";
+    const missing = joinList([...(items.some((i) => !i.assigneeName) ? [`assign ${them}`] : []), ...(items.some((i) => !i.dueDate) ? ["set due dates"] : [])], "or");
+    return `Created ${keys}${projects ? ` in ${projects}` : ""}. ${missing ? `Want me to ${missing}?` : "Anything else?"}`;
   }
   if (tool === "update_task_status") {
     return `Moved ${keys} to ${first ? STATUS_NAME[first.status] : "the new status"}. Anything else to update?`;

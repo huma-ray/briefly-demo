@@ -6,5 +6,5 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
   await supabase.auth.signOut({ scope: "local" });
-  return NextResponse.redirect(new URL("/p/WEB/board", request.url));
+  return NextResponse.redirect(new URL("/", request.url));
 }

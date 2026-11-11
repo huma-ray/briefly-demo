@@ -74,6 +74,40 @@ const { data: stillPending } = await admin.from("pending_actions").select("statu
 assert.equal(stillPending.status, "pending", "failed commit rolls back the status flip");
 void mobTask;
 
+// Approvals queue: a person lists only their own undecided proposals
+const { data: aQueue } = await a.sb.from("pending_actions").select("id").eq("status", "pending");
+assert.ok(aQueue.some((r) => r.id === mobProposal), "the owner sees their pending proposal in the queue");
+const { data: bQueue } = await b.sb.from("pending_actions").select("id").eq("status", "pending");
+assert.ok(!bQueue.some((r) => r.id === mobProposal), "another visitor cannot see it");
+assert.ok((await b.sb.rpc("commit_pending_action", { action_id: mobProposal })).error || (await admin.from("pending_actions").select("status").eq("id", mobProposal).single()).data.status === "pending", "another visitor cannot commit it");
+
+// Simulated Slack: per-sandbox, post only as yourself, only status is writable
+const { data: aThreads } = await a.sb.from("slack_threads").select("id, channel, status").order("created_at");
+assert.equal(aThreads.filter((t) => t.status === "waiting").length, 3, "a fresh sandbox has 3 threads waiting for a reply");
+const partner = aThreads.find((t) => t.channel === "#partner-kr");
+const { data: bSees } = await b.sb.from("slack_threads").select("id").eq("id", partner.id);
+assert.equal(bSees.length, 0, "another visitor cannot read the thread");
+const { data: bMsgs } = await b.sb.from("slack_messages").select("id").eq("thread_id", partner.id);
+assert.equal(bMsgs.length, 0, "nor its messages");
+const { error: impersonate } = await a.sb.from("slack_messages").insert({ workspace_id: a.ws, thread_id: partner.id, author_member_id: (await admin.from("members").select("id").eq("workspace_id", a.ws).is("user_id", null).limit(1).single()).data.id, author_name: "x", author_initials: "x", body: "hi" });
+assert.ok(impersonate, "cannot post as another member");
+const { error: scriptEdit } = await a.sb.from("slack_threads").update({ channel: "#hacked" }).eq("id", partner.id);
+assert.ok(scriptEdit, "cannot change a thread's channel or script");
+const replyRunRes = await admin.from("agent_runs").insert({ workspace_id: a.ws, member_id: a.me.id, role: "member", prompt: "reply", model: "x" }).select("id").single();
+assert.ifError(replyRunRes.error);
+const replyRun = replyRunRes.data;
+const replyRes = await admin.from("pending_actions").insert({ workspace_id: a.ws, member_id: a.me.id, run_id: replyRun.id, tool_call_id: "r1", tool: "reply_in_thread", payload: { thread_id: partner.id, text: "Draft" } }).select("id").single();
+assert.ifError(replyRes.error);
+const replyId = replyRes.data.id;
+const r1 = await a.sb.rpc("commit_pending_action", { action_id: replyId, edits: { text: "안녕하세요, 사이즈 보내드립니다" } });
+assert.ifError(r1.error);
+const r2 = await a.sb.rpc("commit_pending_action", { action_id: replyId });
+assert.equal(r2.data.already, true, "a reply posts at most once");
+const { data: posted } = await a.sb.from("slack_messages").select("body, lang, author_member_id").eq("thread_id", partner.id).eq("author_member_id", a.me.id);
+assert.deepEqual(posted.map((m) => [m.body, m.lang]), [["안녕하세요, 사이즈 보내드립니다", "ko"]], "the edited Korean reply is posted once, as the approver");
+const { data: done } = await a.sb.from("slack_threads").select("status").eq("id", partner.id).single();
+assert.equal(done.status, "done", "posting resolves the thread");
+
 // Approval commit: happy path, edited title, idempotent
 const webId = (await a.sb.from("projects").select("id").eq("key", "WEB").single()).data.id;
 const okProposal = await proposal("create_task", { tasks: [{ project_id: webId, title: "Pricing page" }, { project_id: webId, title: "Email sequence" }] });
@@ -94,7 +128,7 @@ const { error: forgeRun } = await a.sb.from("agent_runs").insert({ workspace_id:
 assert.ok(forgeRun, "people cannot insert runs");
 
 // Runs: Member sees own, Admin sees all (B cannot see A's)
-assert.equal((await a.sb.from("agent_runs").select("id")).data.length, 1);
+assert.equal((await a.sb.from("agent_runs").select("id")).data.length, 2); // the task-proposal run and the reply run
 assert.equal((await b.sb.from("agent_runs").select("id")).data.length, 0);
 
 // Server-only functions
@@ -104,9 +138,9 @@ assert.ok((await a.sb.rpc("record_usage", { cost: 1 })).error, "people cannot re
 // Agent log visibility (8.3): Admin sees all runs of the workspace, Member only their own
 const { data: otherMember } = await admin.from("members").select("id").eq("workspace_id", a.ws).is("user_id", null).limit(1).single();
 assert.ifError((await admin.from("agent_runs").insert({ workspace_id: a.ws, member_id: otherMember.id, role: "member", prompt: "someone else", model: "test" })).error);
-assert.equal((await a.sb.from("agent_runs").select("id")).data.length, 1, "Member sees only own runs");
+assert.equal((await a.sb.from("agent_runs").select("id")).data.length, 2, "Member sees only own runs");
 assert.ifError((await a.sb.rpc("demo_set_role", { new_role: "admin" })).error);
-assert.equal((await a.sb.from("agent_runs").select("id")).data.length, 2, "Admin sees all runs in the workspace");
+assert.equal((await a.sb.from("agent_runs").select("id")).data.length, 3, "Admin sees all runs in the workspace");
 assert.equal((await b.sb.from("agent_runs").select("id")).data.length, 0, "other workspace sees none");
 assert.ifError((await a.sb.rpc("demo_set_role", { new_role: "member" })).error);
 

@@ -20,6 +20,7 @@ import { useApp } from "@/components/app-state";
 import { StatusIcon } from "@/components/bits";
 import { I } from "@/components/icons";
 import { useMarks } from "@/components/tasks/marks";
+import { AskButton } from "@/components/tasks/ask-button";
 import { STATUSES, STATUS_NAME, type Status, type Task } from "@/lib/model";
 
 function CardBody({ t }: { t: Task }) {
@@ -60,6 +61,7 @@ function Card({ t, justDragged }: { t: Task; justDragged: React.RefObject<boolea
       }}
     >
       <CardBody t={t} />
+      <AskButton taskKey={t.key} />
     </article>
   );
 }

@@ -8,6 +8,9 @@ export type DisplayOptions = { priority: boolean; due: boolean; label: boolean; 
 const DISPLAY_DEFAULT: DisplayOptions = { priority: true, due: true, label: true, assignee: true };
 const DISPLAY_KEY = "briefly.display";
 
+/** What the composer chip needs to know about an attached simulated Slack thread. */
+export type AttachedThread = { id: string; channel: string; excerpt: string; korean: boolean; waiting: boolean };
+
 export type AppData = {
   workspaceName: string;
   me: Member;
@@ -17,6 +20,8 @@ export type AppData = {
   labels: Label[];
   counts: { visible: number; total: number };
   myOpenTasks: number;
+  /** Own proposals nobody has decided yet (Approvals badge). */
+  pendingApprovals: number;
   inboxUnread: number;
   /** Model the assistant uses now (custom endpoint's model, or the default). */
   modelId: string;
@@ -24,6 +29,8 @@ export type AppData = {
   /** Custom endpoint set by an Admin, or null for the default provider. */
   provider: { baseUrl: string; model: string; keyHint: string | null } | null;
   sourceUrl: string;
+  /** Public demo: the assistant answers fixed questions only (no free text, no model). */
+  scripted: boolean;
 };
 
 type AppState = AppData & {
@@ -43,6 +50,22 @@ type AppState = AppData & {
   markFresh: (ids: string[]) => void;
   display: DisplayOptions;
   setDisplay: (d: DisplayOptions) => void;
+  /** Task attached to the assistant composer as a context chip ("WEB-22"), or null. */
+  assistantTask: string | null;
+  /** Simulated Slack thread attached instead of a task, or null. */
+  assistantThread: AttachedThread | null;
+  /** Attaches a task (or clears any attachment with null) and opens the assistant panel. */
+  askAbout: (key: string | null) => void;
+  /** Attaches a simulated Slack thread (replacing a task) and opens the assistant panel. */
+  askAboutThread: (thread: AttachedThread) => void;
+  /** Opens the assistant panel on a given conversation (from the Approvals page). */
+  openConversation: (id: string) => void;
+  /** Reloads a conversation if the panel is showing it, without opening the panel (a decision made elsewhere). */
+  refreshConversation: (id: string) => void;
+  /** Opens the panel and sends this question right away (Today's quick actions), with no attachment. */
+  askAssistant: (prompt: string) => void;
+  /** Bumped by askAbout / openConversation / refreshConversation / askAssistant; the shell opens the panel unless `quiet`. */
+  assistantRequest: { n: number; convId?: string; quiet?: boolean; prompt?: string };
 };
 
 const Ctx = createContext<AppState | null>(null);
@@ -60,6 +83,25 @@ export function AppProvider({ data, children }: { data: AppData; children: React
   const [searchOpen, setSearchOpen] = useState(false);
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
   const [display, setDisplayState] = useState<DisplayOptions>(DISPLAY_DEFAULT);
+  // One attachment at a time: a task key or a thread.
+  const [attachment, setAttachment] = useState<{ kind: "task"; key: string } | { kind: "thread"; thread: AttachedThread } | null>(null);
+  const [assistantRequest, setAssistantRequest] = useState<{ n: number; convId?: string; quiet?: boolean; prompt?: string }>({ n: 0 });
+
+  // Opening is idempotent, so clearing the chip from inside the open panel is harmless.
+  const askAbout = useCallback((key: string | null) => {
+    setAttachment(key ? { kind: "task", key } : null);
+    setAssistantRequest((r) => ({ n: r.n + 1 }));
+  }, []);
+  const askAboutThread = useCallback((thread: AttachedThread) => {
+    setAttachment({ kind: "thread", thread });
+    setAssistantRequest((r) => ({ n: r.n + 1 }));
+  }, []);
+  const openConversation = useCallback((id: string) => setAssistantRequest((r) => ({ n: r.n + 1, convId: id })), []);
+  const askAssistant = useCallback((prompt: string) => {
+    setAttachment(null);
+    setAssistantRequest((r) => ({ n: r.n + 1, prompt }));
+  }, []);
+  const refreshConversation = useCallback((id: string) => setAssistantRequest((r) => ({ n: r.n + 1, convId: id, quiet: true })), []);
 
   useEffect(() => {
     try {
@@ -111,8 +153,16 @@ export function AppProvider({ data, children }: { data: AppData; children: React
       markFresh,
       display,
       setDisplay,
+      assistantTask: attachment?.kind === "task" ? attachment.key : null,
+      assistantThread: attachment?.kind === "thread" ? attachment.thread : null,
+      askAbout,
+      askAboutThread,
+      openConversation,
+      refreshConversation,
+      askAssistant,
+      assistantRequest,
     };
-  }, [data, pathname, withParams, searchOpen, freshIds, markFresh, display, setDisplay]);
+  }, [data, pathname, withParams, searchOpen, freshIds, markFresh, display, setDisplay, attachment, askAbout, askAboutThread, openConversation, refreshConversation, askAssistant, assistantRequest]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
