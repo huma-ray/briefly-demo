@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // No login page: a visitor without a session gets an anonymous one.
 export async function proxy(request: NextRequest) {
+  // The homepage is static: no session until the visitor opens the demo.
+  if (request.nextUrl.pathname === "/") return NextResponse.next();
   let response = NextResponse.next({ request });
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {

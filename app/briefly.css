@@ -565,3 +565,20 @@ td.tools code{font-family:var(--font-mono);font-size:11px;color:var(--muted);whi
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
+
+/* Role picker shown on entering the demo from the homepage */
+.role-opts{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.role-opt{display:flex;flex-direction:column;gap:3px;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer;transition:border-color .15s,background .15s}
+.role-opt b{font-weight:600;color:var(--fg)}
+.role-opt span{color:var(--muted);font-size:12.5px;line-height:1.45}
+.role-opt:hover{border-color:var(--accent);background:var(--accent-soft)}
+.role-opt:disabled{opacity:.6;cursor:progress}
+
+/* Demo strip actions: back to the homepage, revert the sandbox */
+.strip-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.strip-actions > a{color:var(--faint);margin-right:4px}
+.strip-btn{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--fg);font:inherit;font-weight:500;text-decoration:none;cursor:pointer}
+.strip-btn:hover{border-color:var(--fg)}
+.btn-danger{background:var(--danger);color:#fff;border-color:transparent}
+.btn-danger:hover{filter:brightness(.92)}
+.revert-f{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}

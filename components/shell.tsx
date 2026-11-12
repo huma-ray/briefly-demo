@@ -8,6 +8,8 @@ import { useApp } from "@/components/app-state";
 import { Avatar } from "@/components/bits";
 import { I, IconSprite } from "@/components/icons";
 import { AssistantPanel } from "@/components/assistant/assistant-panel";
+import { DemoActions } from "@/components/demo-actions";
+import { RolePicker } from "@/components/role-picker";
 import { SearchPalette } from "@/components/tasks/search-palette";
 import { TaskSheetHost } from "@/components/tasks/task-sheet";
 import type { Role } from "@/lib/model";
@@ -266,9 +268,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="strip">
           <span className="tag-demo">Demo</span>
           <span>Sample workspace. Data resets every night at 03:00 KST.</span>
-          <a className="r" href={app.sourceUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-            Self-built demo · source on GitHub
-          </a>
+          <span className="r strip-actions">
+            <a href={app.sourceUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+              Self-built demo · source on GitHub
+            </a>
+            <DemoActions />
+          </span>
         </div>
 
         {children}
@@ -290,6 +295,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       <SearchPalette />
       <TaskSheetHost />
+      <RolePicker />
     </div>
   );
 }
